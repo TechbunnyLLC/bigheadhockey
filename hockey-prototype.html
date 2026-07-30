@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8" />
+<title>Big Head Hockey — Prototype</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.70.0/phaser.min.js"></script>
+<style>
+  html,body{margin:0;background:#0b1722;display:flex;flex-direction:column;align-items:center;font-family:Arial,sans-serif;color:#eee}
+  #ui{padding:10px 0;text-align:center}
+  #ui b{color:#5ec8e8}
+  .keys{font-size:13px;color:#9fb4bd;margin-top:4px}
+</style>
+</head>
+<body>
+<div id="ui">
+  <div><b>Player 1 (Blue)</b>: Arrow keys to move, / to shoot &nbsp;&nbsp; <b>Player 2 (Red)</b>: WASD to move, Space to shoot</div>
+  <div class="keys">Big Head: P1 press "L" &nbsp; P2 press "K" — bigger hitbox &amp; power shot, but turns slower while active (6s)</div>
+</div>
+<div id="game"></div>
+<script>
+const W = 900, H = 520;
+const RINK = { x: 40, y: 40, w: W-80, h: H-80 };
+const GOAL_W = 14, GOAL_H = 110;
+
+class Main extends Phaser.Scene {
+  create() {
+    this.cameras.main.setBackgroundColor('#dff1fb');
+
+    // Rink
+    const g = this.add.graphics();
+    g.fillStyle(0xffffff, 1).fillRect(RINK.x, RINK.y, RINK.w, RINK.h);
+    g.lineStyle(4, 0x1a2b68, 1).strokeRect(RINK.x, RINK.y, RINK.w, RINK.h);
+    g.lineStyle(3, 0xc0392b, 0.7).lineBetween(W/2, RINK.y, W/2, RINK.y+RINK.h);
+    g.lineStyle(3, 0x1a2b68, 0.4).strokeCircle(W/2, H/2, 55);
+
+    // Goals (visual)
+    g.fillStyle(0x1a2b68, 0.15).fillRect(RINK.x-6, H/2-GOAL_H/2, GOAL_W+6, GOAL_H);
+    g.fillStyle(0x1a2b68, 0.15).fillRect(RINK.x+RINK.w-GOAL_W, H/2-GOAL_H/2, GOAL_W+6, GOAL_H);
+
+    this.physics.world.setBounds(RINK.x, RINK.y, RINK.w, RINK.h);
+
+    // Players
+    this.p1 = this.makePlayer(W*0.28, H/2, 0x2780c7, 'P1');
+    this.p2 = this.makePlayer(W*0.72, H/2, 0xc0392b, 'P2');
+
+    // Puck
+    this.puck = this.add.circle(W/2, H/2, 9, 0x111111);
+    this.physics.add.existing(this.puck);
+    this.puck.body.setCircle(9);
+    this.puck.body.setCollideWorldBounds(true);
+    this.puck.body.setBounce(0.85);
+    this.puck.body.setDamping(true).setDrag(0.985);
+    this.puck.body.setMaxSpeed(650);
+
+    this.physics.add.collider(this.p1.body, this.p2.body);
+    this.physics.add.collider(this.puck, this.p1.body, () => this.hitPuck(this.p1));
+    this.physics.add.collider(this.puck, this.p2.body, () => this.hitPuck(this.p2));
+
+    // Score
+    this.score = { p1: 0, p2: 0 };
+    this.scoreText = this.add.text(W/2, 14, '0 : 0', { fontSize: '26px', fontFamily: 'Arial', color: '#1a2b68', fontStyle: 'bold' }).setOrigin(0.5, 0);
+
+    // Input
+    this.cursors = this.input.keyboard.createCursorKeys();
+    this.wasd = this.input.keyboard.addKeys('W,A,S,D');
+    this.keys = this.input.keyboard.addKeys({ shoot1: '/', shoot2: 'SPACE', big1: 'L', big2: 'K' });
+
+    this.resetPuck = this.resetPuck.bind(this);
+  }
+
+  makePlayer(x, y, color, label) {
+    const body = this.add.circle(x, y, 18, color);
+    this.physics.add.existing(body);
+    body.body.setCircle(18);
+    body.body.setCollideWorldBounds(true);
+    body.body.setBounce(0.3);
+    body.body.setDamping(true).setDrag(0.85);
+    body.baseRadius = 18;
+    body.bigHeadUntil = 0;
+    body.label = label;
+    this.add.text(x, y - 32, label, { fontSize: '12px', color: '#333' }).setOrigin(0.5).setName(label + '_tag');
+    return body;
+  }
+
+  hitPuck(player) {
+    const big = this.time.now < player.bigHeadUntil;
+    const dx = this.puck.x - player.x, dy = this.puck.y - player.y;
+    const dist = Math.max(1, Math.hypot(dx, dy));
+    const power = big ? 620 : 380;
+    this.puck.body.setVelocity((dx/dist)*power, (dy/dist)*power);
+  }
+
+  activateBigHead(player) {
+    player.bigHeadUntil = this.time.now + 6000;
+  }
+
+  resetPuck() {
+    this.puck.body.setVelocity(0,0);
+    this.puck.setPosition(W/2, H/2);
+  }
+
+  update() {
+    const speed = 260;
+    const setVel = (body, up, down, left, right) => {
+      const big = this.time.now < body.bigHeadUntil;
+      const mult = big ? 0.65 : 1; // slower turning/moving while big-headed
+      let vx = 0, vy = 0;
+      if (up) vy -= 1; if (down) vy += 1; if (left) vx -= 1; if (right) vx += 1;
+      const len = Math.hypot(vx, vy) || 1;
+      body.body.setVelocity((vx/len)*speed*mult, (vy/len)*speed*mult);
+    };
+
+    setVel(this.p1, this.cursors.up.isDown, this.cursors.down.isDown, this.cursors.left.isDown, this.cursors.right.isDown);
+    setVel(this.p2, this.wasd.W.isDown, this.wasd.S.isDown, this.wasd.A.isDown, this.wasd.D.isDown);
+
+    // Big head visuals + hitbox
+    [this.p1, this.p2].forEach(pl => {
+      const big = this.time.now < pl.bigHeadUntil;
+      const targetR = big ? pl.baseRadius * 1.9 : pl.baseRadius;
+      if (pl.radius !== targetR) { pl.setRadius(targetR); pl.body.setCircle(targetR); }
+      pl.fillColor = pl === this.p1 ? 0x2780c7 : 0xc0392b;
+      pl.setStrokeStyle(big ? 4 : 0, 0xf0700f);
+    });
+
+    if (Phaser.Input.Keyboard.JustDown(this.keys.big1)) this.activateBigHead(this.p1);
+    if (Phaser.Input.Keyboard.JustDown(this.keys.big2)) this.activateBigHead(this.p2);
+    if (Phaser.Input.Keyboard.JustDown(this.keys.shoot1)) this.hitPuck(this.p1);
+    if (Phaser.Input.Keyboard.JustDown(this.keys.shoot2)) this.hitPuck(this.p2);
+
+    // Goal detection
+    if (this.puck.x < RINK.x + 4 && Math.abs(this.puck.y - H/2) < GOAL_H/2) {
+      this.score.p2++; this.updateScore(); this.resetPuck();
+    } else if (this.puck.x > RINK.x + RINK.w - 4 && Math.abs(this.puck.y - H/2) < GOAL_H/2) {
+      this.score.p1++; this.updateScore(); this.resetPuck();
+    }
+  }
+
+  updateScore() {
+    this.scoreText.setText(`${this.score.p1} : ${this.score.p2}`);
+  }
+}
+
+new Phaser.Game({
+  type: Phaser.AUTO,
+  width: W,
+  height: H,
+  parent: 'game',
+  backgroundColor: '#0b1722',
+  physics: { default: 'arcade', arcade: { debug: false } },
+  scene: Main
+});
+</script>
+</body>
+</html>
